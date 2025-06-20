@@ -1,0 +1,77 @@
+# GitHub Actions Workflow for Restock Radar
+#
+# This workflow automates the process of checking for Amul product stock changes.
+# It runs on a schedule and can also be triggered manually.
+
+name: 'Amul Stock Check'
+
+on:
+  # 1. Schedule: Runs automatically every 6 hours.
+  #    The cron syntax '0 */6 * * *' means "at minute 0 of every 6th hour".
+  #    - You can adjust the schedule as needed. For example, '0 * * * *' for every hour.
+  schedule:
+    - cron: '0 */6 * * *'
+  
+  # 2. Manual Trigger: Allows you to run the workflow on-demand from the GitHub Actions UI.
+  #    This is useful for testing or performing immediate checks.
+  workflow_dispatch:
+
+  # 3. Push Trigger: Runs the workflow on pushes to the main branch to validate changes.
+  #    This ensures the workflow itself remains functional.
+  push:
+    branches:
+      - main
+
+jobs:
+  check-stock:
+    runs-on: ubuntu-latest
+    name: 'Check Amul Stock and Send Notifications'
+
+    steps:
+      # Step 1: Check out the repository's code
+      # This downloads a copy of your code to the runner.
+      - name: 'Check out repository'
+        uses: actions/checkout@v4
+
+      # Step 2: Set up Java Development Kit (JDK)
+      # The application requires Java 17 to build and run.
+      - name: 'Set up JDK 17'
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      # Step 3: Cache Maven dependencies
+      # This step speeds up builds by caching downloaded libraries,
+      # avoiding re-downloads on every run.
+      - name: 'Cache Maven packages'
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+
+      # Step 4: Run the Stock Checker script
+      # This is the main step that executes your application.
+      # It uses GitHub Secrets to securely provide the SMTP credentials.
+      - name: 'Run Stock Checker'
+        env:
+          # Securely inject credentials from GitHub repository secrets
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: |
+          echo "Starting the stock check process..."
+          chmod +x run-stock-checker.sh
+          ./run-stock-checker.sh
+
+      # Step 5: Upload last-known-stock.json as an artifact
+      # This is an optional but highly recommended step for debugging.
+      # It saves the state file from each run, allowing you to see what changes
+      # were detected by comparing the artifacts between runs.
+      - name: 'Archive stock state file'
+        if: always() # This ensures the artifact is uploaded even if the previous step fails
+        uses: actions/upload-artifact@v4
+        with:
+          name: stock-state-${{ github.run_id }}
+          path: last-known-stock.json
+          retention-days: 7 # Keep artifacts for 7 days 

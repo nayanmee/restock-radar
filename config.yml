@@ -1,0 +1,44 @@
+---
+logging:
+  level: INFO
+  loggers:
+    com.radar.stock: DEBUG
+
+# Product monitoring configuration
+# By default, all protein products are monitored. 
+# Uncomment and specify product aliases below to monitor only specific products.
+# To find product aliases, run the application once and check the console output.
+# watchedProducts:
+#   - "amul-protein-buttermilk-200ml"
+#   - "amul-high-protein-lassi-250ml"
+#   - "amul-protein-drink-chocolate-200ml"
+
+# Email configuration for stock notifications
+# Credentials are read from environment variables for security:
+# - SMTP_USERNAME: Your email address (e.g., your.email@gmail.com)
+# - SMTP_PASSWORD: Your app-specific password or OAuth token
+email:
+  # SMTP server settings (configured for Gmail by default)
+  host: "smtp.gmail.com"
+  port: 587
+  enableTLS: true
+  enableSSL: false
+  
+  # Notification settings
+  recipients:  # List of email addresses to notify
+    - "nayanmee55@gmail.com"        # Primary recipient
+    # - "family.member@example.com"  # Add family member
+    # - "friend@example.com"         # Add friend
+  
+  # Alternative single recipient configuration (backward compatibility):
+  # recipient: "nayanmee55@gmail.com"
+  
+  senderName: "Amul Stock Radar"
+  enabled: true
+  
+  # Alternative configurations for other providers:
+  # For Outlook/Hotmail:
+  # host: "smtp-mail.outlook.com"
+  # port: 587
+  # enableTLS: true
+  # enableSSL: false
