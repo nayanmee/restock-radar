@@ -50,7 +50,12 @@ jobs:
           key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
           restore-keys: ${{ runner.os }}-m2
 
-      # Step 4: Run the Stock Checker script
+      # Step 4: Build the application
+      # This compiles the Java code and creates the executable JAR file.
+      - name: 'Build Application with Maven'
+        run: mvn -B clean package
+
+      # Step 5: Run the Stock Checker script
       # This is the main step that executes your application.
       # It uses GitHub Secrets to securely provide the SMTP credentials.
       - name: 'Run Stock Checker'
@@ -63,7 +68,7 @@ jobs:
           chmod +x run-stock-checker.sh
           ./run-stock-checker.sh
 
-      # Step 5: Upload last-known-stock.json as an artifact
+      # Step 6: Upload last-known-stock.json as an artifact
       # This is an optional but highly recommended step for debugging.
       # It saves the state file from each run, allowing you to see what changes
       # were detected by comparing the artifacts between runs.
