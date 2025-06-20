@@ -6,11 +6,10 @@
 name: 'Amul Stock Check'
 
 on:
-  # 1. Schedule: Runs automatically every 6 hours.
-  #    The cron syntax '0 */6 * * *' means "at minute 0 of every 6th hour".
-  #    - You can adjust the schedule as needed. For example, '0 * * * *' for every hour.
+  # 1. Schedule: Runs automatically every 15 minutes.
+  #    The cron syntax '*/15 * * * *' means "at any minute that is a multiple of 15".
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '*/15 * * * *'
   
   # 2. Manual Trigger: Allows you to run the workflow on-demand from the GitHub Actions UI.
   #    This is useful for testing or performing immediate checks.
