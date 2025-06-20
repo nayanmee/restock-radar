@@ -50,12 +50,23 @@ jobs:
           key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
           restore-keys: ${{ runner.os }}-m2
 
-      # Step 4: Build the application
+      # Step 4: Debug API Response (Temporary)
+      # This step calls the Amul API directly to see its raw response.
+      # This helps diagnose if the API is down or blocking GitHub's IP.
+      - name: 'Debug API Response'
+        run: |
+          echo "Pinging Amul API to check for a direct response..."
+          curl -v -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15" \
+          -H "Accept: application/json, text/plain, */*" \
+          -H "Referer: https://shop.amul.com/" \
+          "https://shop.amul.com/api/1/entity/ms.products?fields%5Bname%5D=1&fields%5Bbrand%5D=1&fields%5Bcategories%5D=1&fields%5Bcollections%5D=1&fields%5Balias%5D=1&fields%5Bsku%5D=1&fields%5Bprice%5D=1&fields%5Bcompare_price%5D=1&fields%5Boriginal_price%5D=1&fields%5Bimages%5D=1&fields%5Bmetafields%5D=1&fields%5Bdiscounts%5D=1&fields%5Bcatalog_only%5D=1&fields%5Bis_catalog%5D=1&fields%5Bseller%5D=1&fields%5Bavailable%5D=1&fields%5Binventory_quantity%5D=1&fields%5Bnet_quantity%5D=1&fields%5Bnum_reviews%5D=1&fields%5Bavg_rating%5D=1&fields%5Binventory_low_stock_quantity%5D=1&fields%5Binventory_allow_out_of_stock%5D=1&fields%5Bdefault_variant%5D=1&fields%5Bvariants%5D=1&fields%5Blp_seller_ids%5D=1&filters%5B0%5D%5Bfield%5D=categories&filters%5B0%5D%5Bvalue%5D%5B0%5D=protein&filters%5B0%5D%5Boperator%5D=in&filters%5B0%5D%5Boriginal%5D=1&facets=true&facetgroup=default_category_facet&limit=32&total=1&start=0&cdc=1m&substore=66505ff0998183e1b1935c75"
+
+      # Step 5: Build the application
       # This compiles the Java code and creates the executable JAR file.
       - name: 'Build Application with Maven'
         run: mvn -B clean package
 
-      # Step 5: Run the Stock Checker script
+      # Step 6: Run the Stock Checker script
       # This is the main step that executes your application.
       # It uses GitHub Secrets to securely provide the SMTP credentials.
       - name: 'Run Stock Checker'
@@ -68,7 +79,7 @@ jobs:
           chmod +x run-stock-checker.sh
           ./run-stock-checker.sh
 
-      # Step 6: Upload last-known-stock.json as an artifact
+      # Step 7: Upload last-known-stock.json as an artifact
       # This is an optional but highly recommended step for debugging.
       # It saves the state file from each run, allowing you to see what changes
       # were detected by comparing the artifacts between runs.
