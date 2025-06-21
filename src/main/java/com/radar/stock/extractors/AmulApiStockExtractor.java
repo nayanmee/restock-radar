@@ -3,20 +3,21 @@ package com.radar.stock.extractors;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.radar.stock.core.RetryUtility;
 import com.radar.stock.models.Product;
-import jakarta.ws.rs.client.Client;
-import jakarta.ws.rs.client.ClientBuilder;
-import jakarta.ws.rs.core.MediaType;
-import jakarta.ws.rs.core.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.security.cert.X509Certificate;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
-import java.security.cert.X509Certificate;
 
 /**
  * StockExtractor implementation for the Amul Shop API.
@@ -74,18 +75,39 @@ public class AmulApiStockExtractor implements StockExtractor {
         "cdc=1m&" +
         "substore=66505ff0998183e1b1935c75";
     
+    private final HttpClient httpClient;
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    public AmulApiStockExtractor() {
+        this.httpClient = createTrustAllHttpClient();
+    }
+    
     /**
      * Creates the HTTP headers required by the Amul API.
-     * These headers make the request appear as a legitimate browser call.
+     * These headers make the request appear as a legitimate browser call,
+     * which is crucial for avoiding bot detection on platforms like GitHub Actions.
      * 
      * @return Map of header names to values
      */
-    private Map<String, String> createHeaders() {
-        return Map.of(
-            "User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15",
+    private String[] createHeaders() {
+        // The new HttpClient requires headers as a flat array of key-value pairs.
+        // This list is based on a real browser request to improve success rate.
+        return new String[]{
+            "User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
             "Accept", "application/json, text/plain, */*",
-            "Referer", "https://shop.amul.com/"
-        );
+            "Accept-Language", "en-IN,en-GB;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Referer", "https://shop.amul.com/en/browse/protein",
+            "base_url", "https://shop.amul.com/en/browse/protein",
+            "frontend", "1",
+            "sec-ch-ua", "\"Google Chrome\";v=\"137\", \"Chromium\";v=\"137\", \"Not/A)Brand\";v=\"24\"",
+            "sec-ch-ua-mobile", "?0",
+            "sec-ch-ua-platform", "\"macOS\"",
+            "Sec-Fetch-Dest", "empty",
+            "Sec-Fetch-Mode", "cors",
+            "Sec-Fetch-Site", "same-origin",
+            // This 'tid' is likely a transaction or session ID and might need to be updated periodically if issues recur.
+            "tid", "1750505532027:941:b5b2cd66cd8d0d0155fa012df1d4998ca69612508d99f7959ec3b472b7a7e475"
+        };
     }
     
     @Override
@@ -115,7 +137,7 @@ public class AmulApiStockExtractor implements StockExtractor {
     }
     
     /**
-     * Internal method to fetch stock data from the API.
+     * Internal method to fetch stock data from the API using Java's built-in HttpClient.
      * This is separated to allow clean retry logic without exception wrapping.
      * 
      * @param productAliases List of product aliases to filter by (or null for all)
@@ -124,92 +146,67 @@ public class AmulApiStockExtractor implements StockExtractor {
      */
     private List<Product> fetchStockDataFromApi(List<String> productAliases) throws StockExtractionException {
         try {
-            // Create HTTP client with SSL context that trusts all certificates
-            // Note: In production, proper certificate validation should be used
-            Client client = createTrustAllClient();
-            
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(PROTEIN_PRODUCTS_URL))
+                .headers(createHeaders())
+                .timeout(Duration.ofSeconds(15))
+                .GET()
+                .build();
+
             LOGGER.debug("Making API request to: {}", PROTEIN_PRODUCTS_URL);
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             
-            // Make HTTP GET request with required headers
-            Response response = client.target(PROTEIN_PRODUCTS_URL)
-                .request(MediaType.APPLICATION_JSON)
-                .header("User-Agent", createHeaders().get("User-Agent"))
-                .header("Accept", createHeaders().get("Accept"))
-                .header("Referer", createHeaders().get("Referer"))
-                .get();
-            
-            // Enhanced error handling with specific HTTP status checks
-            if (response.getStatus() >= 500) {
-                // Server errors - retryable
-                throw new StockExtractionException(
-                    String.format("Server error (status %d): %s. This may be temporary.", 
-                        response.getStatus(), response.getStatusInfo().getReasonPhrase())
-                );
-            } else if (response.getStatus() == 429) {
-                // Rate limiting - retryable
-                throw new StockExtractionException(
-                    "Rate limit exceeded (status 429). Please try again later."
-                );
-            } else if (response.getStatus() >= 400) {
-                // Client errors - usually not retryable
-                throw new StockExtractionException(
-                    String.format("Client error (status %d): %s", 
-                        response.getStatus(), response.getStatusInfo().getReasonPhrase())
-                );
-            } else if (response.getStatus() != 200) {
-                // Other non-success statuses
-                throw new StockExtractionException(
-                    String.format("Unexpected response status %d: %s", 
-                        response.getStatus(), response.getStatusInfo().getReasonPhrase())
-                );
+            int statusCode = response.statusCode();
+            if (statusCode >= 500) {
+                throw new StockExtractionException(String.format("Server error (status %d). This may be temporary.", statusCode));
+            } else if (statusCode == 429) {
+                throw new StockExtractionException("Rate limit exceeded (status 429). Please try again later.");
+            } else if (statusCode >= 400) {
+                throw new StockExtractionException(String.format("Client error (status %d)", statusCode));
+            } else if (statusCode != 200) {
+                throw new StockExtractionException(String.format("Unexpected response status %d", statusCode));
             }
-            
-            // Parse JSON response
-            String jsonResponse = response.readEntity(String.class);
-            
+
+            String jsonResponse = response.body();
             if (jsonResponse == null || jsonResponse.trim().isEmpty()) {
                 throw new StockExtractionException("Received empty response from API");
             }
             
             LOGGER.debug("Received JSON response: {} characters", jsonResponse.length());
             
-            ObjectMapper objectMapper = new ObjectMapper();
             AmulApiResponse apiResponse;
-            
             try {
                 apiResponse = objectMapper.readValue(jsonResponse, AmulApiResponse.class);
             } catch (Exception e) {
-                throw new StockExtractionException("Failed to parse JSON response from API", e);
+                String errorDetails = String.format(
+                    "Failed to parse JSON response from API. Response was %d chars. Body: %s",
+                    jsonResponse.length(), jsonResponse);
+                throw new StockExtractionException(errorDetails, e);
             }
             
             if (apiResponse == null || apiResponse.data() == null) {
                 throw new StockExtractionException("API returned null or invalid data structure");
             }
             
-            // Transform AmulProduct objects to our Product domain objects
             List<Product> allProducts = apiResponse.data().stream()
                 .map(this::transformToProduct)
                 .collect(Collectors.toList());
             
             LOGGER.debug("Successfully parsed {} products from API response", allProducts.size());
             
-            // Filter by aliases if specified
             if (productAliases != null && !productAliases.isEmpty()) {
-                List<Product> filteredProducts = allProducts.stream()
+                return allProducts.stream()
                     .filter(product -> productAliases.contains(product.alias()))
                     .collect(Collectors.toList());
-                
-                LOGGER.debug("Filtered to {} products matching specified aliases", filteredProducts.size());
-                return filteredProducts;
             }
             
             return allProducts;
             
-        } catch (StockExtractionException e) {
-            // Re-throw our custom exceptions
-            throw e;
         } catch (Exception e) {
-            // Wrap other exceptions
+            if (e instanceof StockExtractionException) {
+                throw (StockExtractionException) e;
+            }
             throw new StockExtractionException("Unexpected error during API call", e);
         }
     }
@@ -249,41 +246,31 @@ public class AmulApiStockExtractor implements StockExtractor {
      * @return Map of HTTP headers
      */
     public Map<String, String> getHeaders() {
-        return createHeaders();
+        // This method is no longer used by the core logic but can be kept for debugging/info
+        return Map.of();
     }
     
-    /**
-     * Creates an HTTP client configured to trust all SSL certificates.
-     * This is appropriate for development/testing but should use proper
-     * certificate validation in production environments.
-     * 
-     * @return Configured Jersey Client
-     * @throws Exception if SSL context creation fails
-     */
-    private Client createTrustAllClient() throws Exception {
-        // Create a trust manager that accepts all certificates
-        TrustManager[] trustAllCerts = new TrustManager[] {
-            new X509TrustManager() {
-                public X509Certificate[] getAcceptedIssuers() {
-                    return null;
+    private HttpClient createTrustAllHttpClient() {
+        try {
+            TrustManager[] trustAllCerts = new TrustManager[]{
+                new X509TrustManager() {
+                    public X509Certificate[] getAcceptedIssuers() { return null; }
+                    public void checkClientTrusted(X509Certificate[] certs, String authType) { }
+                    public void checkServerTrusted(X509Certificate[] certs, String authType) { }
                 }
-                public void checkClientTrusted(X509Certificate[] certs, String authType) {
-                    // Trust all client certificates
-                }
-                public void checkServerTrusted(X509Certificate[] certs, String authType) {
-                    // Trust all server certificates
-                }
-            }
-        };
-        
-        // Create SSL context with the trust-all manager
-        SSLContext sslContext = SSLContext.getInstance("TLS");
-        sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
-        
-        // Create client with custom SSL context
-        return ClientBuilder.newBuilder()
-            .sslContext(sslContext)
-            .hostnameVerifier((hostname, session) -> true) // Trust all hostnames
-            .build();
+            };
+            
+            SSLContext sslContext = SSLContext.getInstance("TLS");
+            sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
+            
+            return HttpClient.newBuilder()
+                .sslContext(sslContext)
+                .version(HttpClient.Version.HTTP_2)
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .build();
+        } catch (Exception e) {
+            LOGGER.error("Failed to create trust-all HTTP client, falling back to default", e);
+            return HttpClient.newHttpClient();
+        }
     }
 } 

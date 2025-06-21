@@ -76,8 +76,9 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
         run: |
           echo "Starting the stock check process..."
-          chmod +x run-stock-checker.sh
-          ./run-stock-checker.sh
+          java -Dsun.net.http.allowRestrictedHeaders=true \
+               -jar target/restock-radar-1.0-SNAPSHOT.jar \
+               check-stock config.yml
 
       # Step 7: Upload last-known-stock.json as an artifact
       # This is an optional but highly recommended step for debugging.
