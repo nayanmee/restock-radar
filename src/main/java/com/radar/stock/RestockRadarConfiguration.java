@@ -61,9 +61,13 @@ public class RestockRadarConfiguration extends Configuration {
     
     /**
      * Email configuration for SMTP settings and recipients.
-     * Credentials should be provided via environment variables for security.
+     * Credentials are read from environment variables SMTP_USERNAME and SMTP_PASSWORD.
      */
     public static class EmailConfiguration {
+        
+        // Environment variable names
+        public static final String USERNAME_ENV = "SMTP_USERNAME";
+        public static final String PASSWORD_ENV = "SMTP_PASSWORD";
         
         @NotEmpty
         @JsonProperty
@@ -89,11 +93,7 @@ public class RestockRadarConfiguration extends Configuration {
         @JsonProperty
         private boolean enabled = true;
         
-        // Environment variable names for credentials
-        public static final String USERNAME_ENV = "SMTP_USERNAME";
-        public static final String PASSWORD_ENV = "SMTP_PASSWORD";
-        
-        // Getters and setters
+        // Simple getters and setters
         public String getHost() {
             return host;
         }
@@ -134,25 +134,6 @@ public class RestockRadarConfiguration extends Configuration {
             this.recipients = recipients != null ? recipients : new ArrayList<>();
         }
         
-        /**
-         * Gets the first recipient (for backward compatibility).
-         * 
-         * @return First recipient or null if no recipients configured
-         */
-        @JsonIgnore
-        public String getRecipient() {
-            return recipients.isEmpty() ? null : recipients.get(0);
-        }
-        
-        /**
-         * Sets a single recipient (for backward compatibility).
-         * 
-         * @param recipient The recipient email address
-         */
-        public void setRecipient(String recipient) {
-            this.recipients = recipient != null ? List.of(recipient) : new ArrayList<>();
-        }
-        
         public String getSenderName() {
             return senderName;
         }
@@ -170,7 +151,7 @@ public class RestockRadarConfiguration extends Configuration {
         }
         
         /**
-         * Gets the SMTP username from environment variable.
+         * Gets SMTP username from environment variable.
          * 
          * @return SMTP username or null if not set
          */
@@ -180,7 +161,7 @@ public class RestockRadarConfiguration extends Configuration {
         }
         
         /**
-         * Gets the SMTP password from environment variable.
+         * Gets SMTP password from environment variable.
          * 
          * @return SMTP password or null if not set
          */
@@ -190,19 +171,19 @@ public class RestockRadarConfiguration extends Configuration {
         }
         
         /**
-         * Checks if email configuration is complete and valid.
+         * Checks if email configuration is valid.
          * 
-         * @return true if all required settings and credentials are available
+         * @return true if enabled and has all required settings
          */
         @JsonIgnore
         public boolean isValid() {
-            return enabled && 
-                   host != null && !host.trim().isEmpty() &&
+            if (!enabled) return true; // Valid if disabled
+            
+            return host != null && !host.trim().isEmpty() &&
                    port > 0 &&
                    recipients != null && !recipients.isEmpty() &&
-                   recipients.stream().allMatch(email -> email != null && !email.trim().isEmpty()) &&
-                   getUsername() != null && !getUsername().trim().isEmpty() &&
-                   getPassword() != null && !getPassword().trim().isEmpty();
+                   getUsername() != null &&
+                   getPassword() != null;
         }
         
         /**
@@ -212,9 +193,8 @@ public class RestockRadarConfiguration extends Configuration {
          */
         @JsonIgnore
         public String getSummary() {
-            return String.format("EmailConfiguration[host=%s, port=%d, TLS=%s, SSL=%s, recipients=%d, enabled=%s, credentialsSet=%s]",
-                               host, port, enableTLS, enableSSL, recipients.size(), enabled, 
-                               (getUsername() != null && getPassword() != null));
+            return String.format("EmailConfig[host=%s:%d, TLS=%s, recipients=%d, enabled=%s]",
+                               host, port, enableTLS, recipients.size(), enabled);
         }
     }
 }

@@ -291,7 +291,7 @@ public class EmailNotifier implements Notifier {
         MimeMessage message = new MimeMessage(session);
         
         // Set sender (from address)
-        message.setFrom(new InternetAddress(username));
+        message.setFrom(new InternetAddress());
         
         // Set recipients (to addresses)
         if (notification.recipients().isEmpty()) {

@@ -140,7 +140,7 @@ run_stock_checker() {
     echo ""
     
     # Run the application and capture exit code
-    if java -jar "$JAR_FILE" check-stock; then
+    if java -jar "$JAR_FILE" check-stock "$CONFIG_FILE"; then
         print_success "Stock check completed successfully!"
         
         # Show state file info after run
