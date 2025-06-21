@@ -141,7 +141,7 @@ run_stock_checker() {
     
     # Define Java command with system property to allow restricted headers
     # This is crucial for avoiding bot detection on certain networks
-    JAVA_CMD="java -Dsun.net.http.allowRestrictedHeaders=true -jar \"$JAR_FILE\" check-stock \"$CONFIG_FILE\""
+    JAVA_CMD="java -jar \"$JAR_FILE\" check-stock \"$CONFIG_FILE\""
     
     # Run the application and capture exit code
     if eval "$JAVA_CMD"; then
