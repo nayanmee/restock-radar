@@ -6,6 +6,7 @@ import com.radar.stock.models.Product;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -14,6 +15,9 @@ import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
@@ -32,48 +36,10 @@ public class AmulApiStockExtractor implements StockExtractor {
     
     private static final Logger LOGGER = LoggerFactory.getLogger(AmulApiStockExtractor.class);
     
-    // API endpoint discovered through browser analysis
+    // Base URL for the API, the rest will be constructed dynamically.
     private static final String API_BASE_URL = "https://shop.amul.com/api/1/entity/ms.products";
-    
-    // Complete URL with all required query parameters for protein products
-    private static final String PROTEIN_PRODUCTS_URL = 
-        API_BASE_URL + "?" +
-        "fields%5Bname%5D=1&" +
-        "fields%5Bbrand%5D=1&" +
-        "fields%5Bcategories%5D=1&" +
-        "fields%5Bcollections%5D=1&" +
-        "fields%5Balias%5D=1&" +
-        "fields%5Bsku%5D=1&" +
-        "fields%5Bprice%5D=1&" +
-        "fields%5Bcompare_price%5D=1&" +
-        "fields%5Boriginal_price%5D=1&" +
-        "fields%5Bimages%5D=1&" +
-        "fields%5Bmetafields%5D=1&" +
-        "fields%5Bdiscounts%5D=1&" +
-        "fields%5Bcatalog_only%5D=1&" +
-        "fields%5Bis_catalog%5D=1&" +
-        "fields%5Bseller%5D=1&" +
-        "fields%5Bavailable%5D=1&" +
-        "fields%5Binventory_quantity%5D=1&" +
-        "fields%5Bnet_quantity%5D=1&" +
-        "fields%5Bnum_reviews%5D=1&" +
-        "fields%5Bavg_rating%5D=1&" +
-        "fields%5Binventory_low_stock_quantity%5D=1&" +
-        "fields%5Binventory_allow_out_of_stock%5D=1&" +
-        "fields%5Bdefault_variant%5D=1&" +
-        "fields%5Bvariants%5D=1&" +
-        "fields%5Blp_seller_ids%5D=1&" +
-        "filters%5B0%5D%5Bfield%5D=categories&" +
-        "filters%5B0%5D%5Bvalue%5D%5B0%5D=protein&" +
-        "filters%5B0%5D%5Boperator%5D=in&" +
-        "filters%5B0%5D%5Boriginal%5D=1&" +
-        "facets=true&" +
-        "facetgroup=default_category_facet&" +
-        "limit=32&" +
-        "total=1&" +
-        "start=0&" +
-        "cdc=1m&" +
-        "substore=66505ff0998183e1b1935c75";
+    // URL of the page we scrape for dynamic tokens.
+    private static final String BROWSE_PAGE_URL = "https://shop.amul.com/en/browse/protein";
     
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -87,12 +53,12 @@ public class AmulApiStockExtractor implements StockExtractor {
      * These headers make the request appear as a legitimate browser call,
      * which is crucial for avoiding bot detection on platforms like GitHub Actions.
      * 
-     * @return Map of header names to values
+     * @param sessionToken A dynamic session token, or null if not yet fetched.
+     * @return Array of header names to values
      */
-    private String[] createHeaders() {
-        // The new HttpClient requires headers as a flat array of key-value pairs.
+    private String[] createHeaders(String sessionToken) {
         // This list is based on a real browser request to improve success rate.
-        return new String[]{
+        String[] baseHeaders = new String[]{
             "User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
             "Accept", "application/json, text/plain, */*",
             "Accept-Language", "en-IN,en-GB;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -105,9 +71,19 @@ public class AmulApiStockExtractor implements StockExtractor {
             "Sec-Fetch-Dest", "empty",
             "Sec-Fetch-Mode", "cors",
             "Sec-Fetch-Site", "same-origin",
-            // This 'tid' is likely a transaction or session ID and might need to be updated periodically if issues recur.
             "tid", "1750505532027:941:b5b2cd66cd8d0d0155fa012df1d4998ca69612508d99f7959ec3b472b7a7e475"
         };
+
+        if (sessionToken != null) {
+            // Add the dynamic token header if it exists
+            String[] withToken = new String[baseHeaders.length + 2];
+            System.arraycopy(baseHeaders, 0, withToken, 0, baseHeaders.length);
+            withToken[baseHeaders.length] = "token";
+            withToken[baseHeaders.length + 1] = sessionToken;
+            return withToken;
+        }
+
+        return baseHeaders;
     }
     
     @Override
@@ -146,14 +122,20 @@ public class AmulApiStockExtractor implements StockExtractor {
      */
     private List<Product> fetchStockDataFromApi(List<String> productAliases) throws StockExtractionException {
         try {
+            // --- DYNAMIC PARAMETER LOGIC ---
+            String sessionToken = fetchDynamicSessionToken().orElseThrow(() -> new StockExtractionException("Could not find dynamic session token"));
+            String substoreId = "66505ff0998183e1b1935c75"; // This seems to be static, but we fetch a session token.
+
+            String apiUrl = buildApiUrl(substoreId);
+
             HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(PROTEIN_PRODUCTS_URL))
-                .headers(createHeaders())
+                .uri(URI.create(apiUrl))
+                .headers(createHeaders(sessionToken)) // Pass the dynamic token here
                 .timeout(Duration.ofSeconds(15))
                 .GET()
                 .build();
 
-            LOGGER.debug("Making API request to: {}", PROTEIN_PRODUCTS_URL);
+            LOGGER.debug("Making API request to: {}", apiUrl);
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             
@@ -212,6 +194,90 @@ public class AmulApiStockExtractor implements StockExtractor {
     }
     
     /**
+     * Fetches the Amul browse page and parses it to find the dynamic 'token' for the session.
+     * This is crucial for making the API requests appear authentic.
+     *
+     * @return An Optional containing the session token if found, otherwise empty.
+     * @throws StockExtractionException if the page fetch fails.
+     */
+    private Optional<String> fetchDynamicSessionToken() throws StockExtractionException {
+        try {
+            LOGGER.info("Fetching dynamic session token from browse page...");
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BROWSE_PAGE_URL))
+                .headers(createHeaders(null)) // Don't need a token to get the token
+                .timeout(Duration.ofSeconds(15))
+                .GET()
+                .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            String htmlBody = response.body();
+
+            // The token is in a script tag: <script>token = "some_value"</script>
+            Pattern pattern = Pattern.compile("token\\s*=\\s*\"([a-f0-9]{24})\"");
+            Matcher matcher = pattern.matcher(htmlBody);
+
+            if (matcher.find()) {
+                String sessionToken = matcher.group(1);
+                LOGGER.info("Successfully extracted dynamic session token: {}", sessionToken);
+                return Optional.of(sessionToken);
+            } else {
+                LOGGER.warn("Could not find session token in the page body. The API call will likely fail.");
+                return Optional.empty();
+            }
+        } catch (IOException | InterruptedException e) {
+            Thread.currentThread().interrupt(); // Preserve interrupted status
+            throw new StockExtractionException("Failed to fetch or parse the browse page for dynamic tokens", e);
+        }
+    }
+
+    /**
+     * Constructs the full API URL with the dynamically fetched substore ID.
+     *
+     * @param substoreId The dynamic substore ID.
+     * @return The complete URL for fetching protein products.
+     */
+    private String buildApiUrl(String substoreId) {
+        return API_BASE_URL + "?" +
+            "fields%5Bname%5D=1&" +
+            "fields%5Bbrand%5D=1&" +
+            "fields%5Bcategories%5D=1&" +
+            "fields%5Bcollections%5D=1&" +
+            "fields%5Balias%5D=1&" +
+            "fields%5Bsku%5D=1&" +
+            "fields%5Bprice%5D=1&" +
+            "fields%5Bcompare_price%5D=1&" +
+            "fields%5Boriginal_price%5D=1&" +
+            "fields%5Bimages%5D=1&" +
+            "fields%5Bmetafields%5D=1&" +
+            "fields%5Bdiscounts%5D=1&" +
+            "fields%5Bcatalog_only%5D=1&" +
+            "fields%5Bis_catalog%5D=1&" +
+            "fields%5Bseller%5D=1&" +
+            "fields%5Bavailable%5D=1&" +
+            "fields%5Binventory_quantity%5D=1&" +
+            "fields%5Bnet_quantity%5D=1&" +
+            "fields%5Bnum_reviews%5D=1&" +
+            "fields%5Bavg_rating%5D=1&" +
+            "fields%5Binventory_low_stock_quantity%5D=1&" +
+            "fields%5Binventory_allow_out_of_stock%5D=1&" +
+            "fields%5Bdefault_variant%5D=1&" +
+            "fields%5Bvariants%5D=1&" +
+            "fields%5Blp_seller_ids%5D=1&" +
+            "filters%5B0%5D%5Bfield%5D=categories&" +
+            "filters%5B0%5D%5Bvalue%5D%5B0%5D=protein&" +
+            "filters%5B0%5D%5Boperator%5D=in&" +
+            "filters%5B0%5D%5Boriginal%5D=1&" +
+            "facets=true&" +
+            "facetgroup=default_category_facet&" +
+            "limit=32&" +
+            "total=1&" +
+            "start=0&" +
+            "cdc=1m&" +
+            "substore=" + substoreId;
+    }
+    
+    /**
      * Transforms an AmulProduct from the API response to our domain Product record.
      * 
      * @param amulProduct The product from the API response
@@ -231,13 +297,9 @@ public class AmulApiStockExtractor implements StockExtractor {
         return "Amul Shop API Extractor";
     }
     
-    /**
-     * Gets the complete URL for fetching protein products.
-     * 
-     * @return The full API URL with query parameters
-     */
     public String getApiUrl() {
-        return PROTEIN_PRODUCTS_URL;
+        // This is now less relevant as the URL is built dynamically.
+        return "See buildApiUrl()";
     }
     
     /**
