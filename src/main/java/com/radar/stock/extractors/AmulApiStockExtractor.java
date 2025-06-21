@@ -35,40 +35,41 @@ public class AmulApiStockExtractor implements StockExtractor {
     private static final String API_BASE_URL = "https://shop.amul.com/api/1/entity/ms.products";
     
     // Complete URL with all required query parameters for protein products
+    // Using the exact URL structure that works in curl
     private static final String PROTEIN_PRODUCTS_URL = 
         API_BASE_URL + "?" +
-        "fields%5Bname%5D=1&" +
-        "fields%5Bbrand%5D=1&" +
-        "fields%5Bcategories%5D=1&" +
-        "fields%5Bcollections%5D=1&" +
-        "fields%5Balias%5D=1&" +
-        "fields%5Bsku%5D=1&" +
-        "fields%5Bprice%5D=1&" +
-        "fields%5Bcompare_price%5D=1&" +
-        "fields%5Boriginal_price%5D=1&" +
-        "fields%5Bimages%5D=1&" +
-        "fields%5Bmetafields%5D=1&" +
-        "fields%5Bdiscounts%5D=1&" +
-        "fields%5Bcatalog_only%5D=1&" +
-        "fields%5Bis_catalog%5D=1&" +
-        "fields%5Bseller%5D=1&" +
-        "fields%5Bavailable%5D=1&" +
-        "fields%5Binventory_quantity%5D=1&" +
-        "fields%5Bnet_quantity%5D=1&" +
-        "fields%5Bnum_reviews%5D=1&" +
-        "fields%5Bavg_rating%5D=1&" +
-        "fields%5Binventory_low_stock_quantity%5D=1&" +
-        "fields%5Binventory_allow_out_of_stock%5D=1&" +
-        "fields%5Bdefault_variant%5D=1&" +
-        "fields%5Bvariants%5D=1&" +
-        "fields%5Blp_seller_ids%5D=1&" +
-        "filters%5B0%5D%5Bfield%5D=categories&" +
-        "filters%5B0%5D%5Bvalue%5D%5B0%5D=protein&" +
-        "filters%5B0%5D%5Boperator%5D=in&" +
-        "filters%5B0%5D%5Boriginal%5D=1&" +
+        "fields[name]=1&" +
+        "fields[brand]=1&" +
+        "fields[categories]=1&" +
+        "fields[collections]=1&" +
+        "fields[alias]=1&" +
+        "fields[sku]=1&" +
+        "fields[price]=1&" +
+        "fields[compare_price]=1&" +
+        "fields[original_price]=1&" +
+        "fields[images]=1&" +
+        "fields[metafields]=1&" +
+        "fields[discounts]=1&" +
+        "fields[catalog_only]=1&" +
+        "fields[is_catalog]=1&" +
+        "fields[seller]=1&" +
+        "fields[available]=1&" +
+        "fields[inventory_quantity]=1&" +
+        "fields[net_quantity]=1&" +
+        "fields[num_reviews]=1&" +
+        "fields[avg_rating]=1&" +
+        "fields[inventory_low_stock_quantity]=1&" +
+        "fields[inventory_allow_out_of_stock]=1&" +
+        "fields[default_variant]=1&" +
+        "fields[variants]=1&" +
+        "fields[lp_seller_ids]=1&" +
+        "filters[0][field]=categories&" +
+        "filters[0][value][0]=protein&" +
+        "filters[0][operator]=in&" +
+        "filters[0][original]=1&" +
         "facets=true&" +
         "facetgroup=default_category_facet&" +
-        "limit=32&" +
+        "limit=24&" +
         "total=1&" +
         "start=0&" +
         "cdc=1m&" +
@@ -131,11 +132,15 @@ public class AmulApiStockExtractor implements StockExtractor {
             LOGGER.debug("Making API request to: {}", PROTEIN_PRODUCTS_URL);
             
             // Make HTTP GET request with required headers
-            Response response = client.target(PROTEIN_PRODUCTS_URL)
+            // Build the URL manually to avoid double encoding issues
+            String requestUrl = PROTEIN_PRODUCTS_URL;
+            
+            Response response = client.target(requestUrl)
                 .request(MediaType.APPLICATION_JSON)
                 .header("User-Agent", createHeaders().get("User-Agent"))
                 .header("Accept", createHeaders().get("Accept"))
                 .header("Referer", createHeaders().get("Referer"))
+                .header("Accept-Language", "en-IN,en-GB;q=0.9,en;q=0.8")
                 .get();
             
             // Enhanced error handling with specific HTTP status checks
@@ -172,6 +177,7 @@ public class AmulApiStockExtractor implements StockExtractor {
             }
             
             LOGGER.debug("Received JSON response: {} characters", jsonResponse.length());
+            LOGGER.debug("Raw JSON response: {}", jsonResponse);
             
             ObjectMapper objectMapper = new ObjectMapper();
             AmulApiResponse apiResponse;
@@ -179,12 +185,19 @@ public class AmulApiStockExtractor implements StockExtractor {
             try {
                 apiResponse = objectMapper.readValue(jsonResponse, AmulApiResponse.class);
             } catch (Exception e) {
+                LOGGER.error("Failed to parse JSON response. Raw JSON: {}", jsonResponse);
                 throw new StockExtractionException("Failed to parse JSON response from API", e);
             }
             
             if (apiResponse == null || apiResponse.data() == null) {
+                LOGGER.error("API returned null or invalid data structure. Raw JSON: {}", jsonResponse);
                 throw new StockExtractionException("API returned null or invalid data structure");
             }
+            
+            LOGGER.debug("Parsed API response: data={}, messages={}, paging={}", 
+                apiResponse.data() != null ? apiResponse.data().size() : "null",
+                apiResponse.messages() != null ? apiResponse.messages().size() : "null",
+                apiResponse.paging() != null ? apiResponse.paging().toString() : "null");
             
             // Transform AmulProduct objects to our Product domain objects
             List<Product> allProducts = apiResponse.data().stream()
