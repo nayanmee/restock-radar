@@ -1,5 +1,7 @@
 package com.radar.stock.models;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 /**
  * Represents a product with its stock information.
  * This record captures the essential data from the Amul API response.
@@ -15,6 +17,7 @@ public record Product(
      * Checks if the product is currently in stock.
      * @return true if the product is available and has inventory > 0
      */
+    @JsonIgnore
     public boolean isInStock() {
         return available && inventoryQuantity > 0;
     }
